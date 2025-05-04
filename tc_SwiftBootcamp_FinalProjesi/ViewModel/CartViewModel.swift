@@ -327,6 +327,78 @@ final class CartViewModel {
         }
     }
     
+    // Sepetten belirli miktarda ürün sil - tamamen yerel olarak çalışan versiyon
+    func removeFromCart(cartItem: CartItem, quantity: Int) -> Observable<Bool> {
+        return Observable.create { [weak self] observer in
+            guard let self = self else {
+                observer.onNext(false)
+                observer.onCompleted()
+                return Disposables.create()
+            }
+            
+            // Mevcut ürünün indeksini bul
+            guard let index = self.cartItems.firstIndex(where: { $0.sepetId == cartItem.sepetId }) else {
+                observer.onNext(false)
+                observer.onCompleted()
+                return Disposables.create()
+            }
+            
+            let existingItem = self.cartItems[index]
+            
+            // Kalan miktar hesapla
+            let remainingQuantity = existingItem.siparisAdeti - quantity
+            
+            var updatedCart = self.cartItems
+            
+            if remainingQuantity <= 0 {
+                // Miktar 0 veya negatif ise ürünü tamamen kaldır
+                updatedCart.remove(at: index)
+                
+                // Eğer geçici bir ID değilse (gerçek sunucu ID'si ise) veya kampanya paketi değilse, API'den de kaldır
+                if (existingItem.sepetId < 10000 || existingItem.sepetId > 99999) && !existingItem.isPromotionPackage {
+                    // API'den silme işlemini başlat ama sonucu bekleme
+                    self.apiService.removeFromCart(cartItem: existingItem)
+                        .subscribe(onNext: { success in
+                        }, onError: { error in
+                        })
+                        .disposed(by: self.disposeBag)
+                }
+            } else {
+                // Miktar pozitif ise, güncellenmiş miktarla yeni bir CartItem oluştur
+                let updatedItem = CartItem(
+                    sepetId: existingItem.sepetId,
+                    ad: existingItem.ad,
+                    resim: existingItem.resim,
+                    kategori: existingItem.kategori,
+                    fiyat: existingItem.fiyat,
+                    marka: existingItem.marka,
+                    siparisAdeti: remainingQuantity,
+                    kullaniciAdi: existingItem.kullaniciAdi,
+                    isPromotionPackage: existingItem.isPromotionPackage,
+                    packageDescription: existingItem.packageDescription
+                )
+                
+                // Güncellenmiş ürünü listeye ekle
+                updatedCart[index] = updatedItem
+                
+                // API'de de güncelle (eğer gerçek bir sunucu kaydıysa)
+                if (existingItem.sepetId < 10000 || existingItem.sepetId > 99999) && !existingItem.isPromotionPackage {
+                    // Burada API'de adet güncelleme işlemi yapılabilir
+                    // Not: Mevcut API işlevinde bu özellik yoksa yoksayılabilir
+                }
+            }
+            
+            // Sepeti güncelle
+            self.cartItems = updatedCart
+            
+            // İşlem başarılı
+            observer.onNext(true)
+            observer.onCompleted()
+            
+            return Disposables.create()
+        }
+    }
+    
     // Sepeti yenile - sadece gerektiğinde API'ye sorgu yapacak
     func fetchCartItems() {
         // Eğer sepet zaten yükleniyorsa çık
